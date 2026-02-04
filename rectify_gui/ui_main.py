@@ -9,7 +9,7 @@ from typing import Optional
 import cv2
 import numpy as np
 from numpy.typing import NDArray
-from PySide6.QtCore import Qt, Signal, QPoint, QPointF, QSize, QTimer
+from PySide6.QtCore import Qt, Signal, QPoint, QPointF, QTimer
 from PySide6.QtGui import (
     QImage, QPixmap, QPainter, QColor, QPen, QBrush,
     QWheelEvent, QMouseEvent, QKeyEvent, QDragEnterEvent, QDropEvent,
@@ -18,7 +18,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QListWidget, QListWidgetItem, QPushButton, QLabel, QCheckBox, QSlider,
-    QGroupBox, QFileDialog, QTextEdit, QTabWidget, QTabBar, QFrame,
+    QFileDialog, QTextEdit, QFrame,
     QSizePolicy,
 )
 
@@ -33,6 +33,30 @@ logger = logging.getLogger(__name__)
 
 HANDLE_RADIUS = 8
 DISPLAY_MAX_DIM = 1200
+
+CHECKBOX_STYLE = """
+    QCheckBox {
+        font-weight: 600;
+        spacing: 8px;
+    }
+    QCheckBox::indicator {
+        width: 18px;
+        height: 18px;
+    }
+    QCheckBox::indicator:unchecked {
+        border: 2px solid #666;
+        background: #fff;
+        border-radius: 3px;
+    }
+    QCheckBox::indicator:checked {
+        border: 2px solid #2e7d32;
+        background: #2e7d32;
+        border-radius: 3px;
+    }
+    QCheckBox::indicator:hover {
+        border-color: #2e7d32;
+    }
+"""
 
 
 class ImageViewerWidget(QWidget):
@@ -209,17 +233,6 @@ class ImageViewerWidget(QWidget):
             self._fit_to_view()
 
 
-class EqualWidthTabBar(QTabBar):
-    """Onglets de largeur égale occupant toute la largeur."""
-
-    def tabSizeHint(self, index: int) -> QSize:
-        n = self.count()
-        if n == 0:
-            return super().tabSizeHint(index)
-        w = max(0, self.width() - 4)
-        return QSize(w // n, super().tabSizeHint(index).height())
-
-
 class MainWindow(QMainWindow):
     def __init__(self, input_dir: Path, output_dir: Path, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -259,50 +272,145 @@ class MainWindow(QMainWindow):
             ("Ajouter fichiers…", self._add_files),
             ("Ajouter dossier input…", self._add_input_folder),
             ("Remplir depuis input/", self._fill_from_input),
-            ("Retirer sélection", self._remove_selected),
-            ("Vider queue", self._clear_queue),
+            ("Retirer la sélection", self._remove_selected),
+            ("Vider la liste d'attente", self._clear_queue),
         ]:
             b = QPushButton(txt)
             b.clicked.connect(fn)
             queue_layout.addWidget(b)
         splitter.addWidget(queue_panel)
 
-        # Centre
+        # Centre : split view Original / Preview
         center_widget = QWidget()
         center_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         center_layout = QVBoxLayout(center_widget)
         center_layout.setSpacing(3)
-        self._tabs = QTabWidget()
-        self._tabs.setTabBar(EqualWidthTabBar(self._tabs))
+
+        center_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Panneau Original (gauche) - encadré
+        original_frame = QFrame()
+        original_frame.setFrameStyle(QFrame.Shape.StyledPanel)
+        original_frame.setStyleSheet(
+            "QFrame { "
+            "border: 1px solid #cfcfcf; "
+            "border-radius: 6px; "
+            "background: #ffffff; "
+            "padding: 6px; "
+            "}"
+        )
+        original_layout = QVBoxLayout(original_frame)
+        original_layout.setContentsMargins(6, 6, 6, 6)
+        original_layout.setSpacing(4)
+        lbl_original = QLabel("Original")
+        lbl_original.setStyleSheet("font-weight: bold; font-size: 11px; color: #333; padding: 2px 0;")
+        original_layout.addWidget(lbl_original)
         self._viewer = ImageViewerWidget()
-        self._viewer.corners_changed.connect(lambda: self._update_preview() if self._tabs.currentIndex() == 1 else None)
-        self._tabs.addTab(self._viewer, "Image")
+        self._viewer.corners_changed.connect(self._schedule_preview_update)
+        original_layout.addWidget(self._viewer, 1)
+        center_splitter.addWidget(original_frame)
+
+        # Panneau Preview (droite) - encadré
+        preview_frame = QFrame()
+        preview_frame.setFrameStyle(QFrame.Shape.StyledPanel)
+        preview_frame.setStyleSheet(
+            "QFrame { "
+            "border: 1px solid #cfcfcf; "
+            "border-radius: 6px; "
+            "background: #ffffff; "
+            "padding: 6px; "
+            "}"
+        )
+        preview_layout = QVBoxLayout(preview_frame)
+        preview_layout.setContentsMargins(6, 6, 6, 6)
+        preview_layout.setSpacing(4)
+        lbl_preview = QLabel("Preview")
+        lbl_preview.setStyleSheet("font-weight: bold; font-size: 11px; color: #333; padding: 2px 0;")
+        preview_layout.addWidget(lbl_preview)
         self._preview_viewer = ImageViewerWidget()
-        self._tabs.addTab(self._preview_viewer, "Preview")
-        self._tabs.currentChanged.connect(self._on_tab_changed)
-        center_layout.addWidget(self._tabs, 1)
+        preview_layout.addWidget(self._preview_viewer, 1)
+        center_splitter.addWidget(preview_frame)
+
+        center_splitter.setSizes([500, 500])
+        center_splitter.setStretchFactor(0, 1)
+        center_splitter.setStretchFactor(1, 1)
+        center_splitter.setHandleWidth(8)
+        center_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #c0c0c0;
+                width: 8px;
+                margin: 0 2px;
+            }
+            QSplitter::handle:hover {
+                background-color: #4a90d9;
+            }
+        """)
+        center_layout.addWidget(center_splitter, 1)
         self._lbl_effects_active = QLabel()
         self._lbl_effects_active.setStyleSheet("color: #666; font-size: 10px;")
 
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
         btn_layout.addWidget(self._lbl_effects_active)
-        btn_layout.addSpacing(10)
+        btn_layout.addStretch()
+        # Groupe Zoom
         for lbl, shortcut, fn in [
             ("Zoom −", "Ctrl+-", self._zoom_out),
             ("Ajuster", "Ctrl+0", self._zoom_fit),
             ("Zoom +", "Ctrl++", self._zoom_in),
-            ("Auto", "A", self._run_auto),
-            ("Reset", "R", self._run_reset),
-            ("Valider & Enregistrer", "Return", self._validate_and_save),
-            ("Passer", None, self._skip_current),
-            ("Précédent", "Left", self._go_prev),
-            ("Suivant", "Right", self._go_next),
         ]:
             b = QPushButton(lbl)
             b.clicked.connect(fn)
             if shortcut:
                 b.setShortcut(shortcut)
             btn_layout.addWidget(b)
+        btn_layout.addStretch()
+        # Groupe Correction
+        for lbl, shortcut, fn in [
+            ("Auto", "A", self._run_auto),
+            ("Reset", "R", self._run_reset),
+        ]:
+            b = QPushButton(lbl)
+            b.clicked.connect(fn)
+            if shortcut:
+                b.setShortcut(shortcut)
+            btn_layout.addWidget(b)
+        btn_layout.addStretch()
+        # Groupe Navigation
+        for lbl, shortcut, fn in [
+            ("Précédent", "Left", self._go_prev),
+            ("Suivant", "Right", self._go_next),
+            ("Passer", None, self._skip_current),
+        ]:
+            b = QPushButton(lbl)
+            b.clicked.connect(fn)
+            if shortcut:
+                b.setShortcut(shortcut)
+            btn_layout.addWidget(b)
+        btn_layout.addStretch()
+        # Bouton primaire Valider & Enregistrer
+        self._btn_validate = QPushButton("Valider && Enregistrer")
+        self._btn_validate.setMinimumWidth(260)
+        self._btn_validate.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._btn_validate.setShortcut(Qt.Key.Key_Return)
+        self._btn_validate.clicked.connect(self._validate_and_save)
+        self._btn_validate.setStyleSheet("""
+            QPushButton {
+                background-color: #2e7d32;
+                color: white;
+                font-weight: bold;
+                padding: 8px 16px;
+                border-radius: 4px;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #1b5e20;
+            }
+            QPushButton:pressed {
+                background-color: #0d3d12;
+            }
+        """)
+        btn_layout.addWidget(self._btn_validate)
         center_layout.addLayout(btn_layout)
         splitter.addWidget(center_widget)
 
@@ -339,8 +447,14 @@ class MainWindow(QMainWindow):
         def _make_effect_box(title: str, tooltip: str) -> tuple[QFrame, QVBoxLayout]:
             """Titre, barre en dessous, puis Activer, slider sur sa ligne, repères, info."""
             box = QFrame()
-            box.setFrameStyle(QFrame.Shape.NoFrame)
-            box.setStyleSheet("QFrame { border: none; border-radius: 3px; background: #fafafa; }")
+            box.setFrameStyle(QFrame.Shape.StyledPanel)
+            box.setStyleSheet(
+                "QFrame { "
+                "background-color: #f6f6f6; "
+                "border: 1px solid #ddd; "
+                "border-radius: 4px; "
+                "}"
+            )
             box.setFixedHeight(EFFECT_BOX_HEIGHT)
             box.setToolTip(tooltip)
             lay = QVBoxLayout(box)
@@ -359,6 +473,7 @@ class MainWindow(QMainWindow):
         # Denoise
         grp, lay = _make_effect_box("Réduction du bruit (NLM)", "Réduit le bruit/grain (scans, faible lumière).")
         self._chk_denoise = QCheckBox("Activer")
+        self._chk_denoise.setStyleSheet(CHECKBOX_STYLE)
         self._chk_denoise.setChecked(False)
         self._chk_denoise.toggled.connect(self._on_options_changed)
         lay.addWidget(self._chk_denoise)
@@ -379,6 +494,7 @@ class MainWindow(QMainWindow):
         # CLAHE
         grp, lay = _make_effect_box("Contraste (CLAHE)", "Renforce le contraste local (documents ternes).")
         self._chk_clahe = QCheckBox("Activer")
+        self._chk_clahe.setStyleSheet(CHECKBOX_STYLE)
         self._chk_clahe.setChecked(False)
         self._chk_clahe.toggled.connect(self._on_options_changed)
         lay.addWidget(self._chk_clahe)
@@ -399,6 +515,7 @@ class MainWindow(QMainWindow):
         # Sharpen
         grp, lay = _make_effect_box("Accentuation (Unsharp Mask)", "Rend les contours plus nets (texte, détails).")
         self._chk_sharpen = QCheckBox("Activer")
+        self._chk_sharpen.setStyleSheet(CHECKBOX_STYLE)
         self._chk_sharpen.setChecked(False)
         self._chk_sharpen.toggled.connect(self._on_options_changed)
         lay.addWidget(self._chk_sharpen)
@@ -419,6 +536,7 @@ class MainWindow(QMainWindow):
         # Taille
         grp, lay = _make_effect_box("Limite de taille", "Évite les sorties trop grandes ou trop petites.")
         self._chk_clamp = QCheckBox("Activer")
+        self._chk_clamp.setStyleSheet(CHECKBOX_STYLE)
         self._chk_clamp.setChecked(True)
         self._chk_clamp.toggled.connect(self._on_options_changed)
         lay.addWidget(self._chk_clamp)
@@ -439,6 +557,18 @@ class MainWindow(QMainWindow):
         splitter.addWidget(options_panel)
 
         splitter.setSizes([200, 860, 240])
+        splitter.setHandleWidth(10)
+        splitter.setStretchFactor(1, 1)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #b0b0b0;
+                width: 10px;
+                margin: 0 2px;
+            }
+            QSplitter::handle:hover {
+                background-color: #4a90d9;
+            }
+        """)
         layout.addWidget(splitter, 1)
 
         self._log_edit = QTextEdit()
@@ -480,27 +610,25 @@ class MainWindow(QMainWindow):
         self._log_edit.append(text)
         self._log_edit.verticalScrollBar().setValue(self._log_edit.verticalScrollBar().maximum())
 
-    def _current_viewer(self) -> ImageViewerWidget:
-        return self._viewer if self._tabs.currentIndex() == 0 else self._preview_viewer
-
-    def _zoom_in(self) -> None:
-        self._current_viewer().zoom_in()
-
-    def _zoom_out(self) -> None:
-        self._current_viewer().zoom_out()
-
-    def _zoom_fit(self) -> None:
-        self._current_viewer().zoom_fit()
-
-    def _on_options_changed(self) -> None:
-        if self._chk_denoise.isChecked() or self._chk_clahe.isChecked() or self._chk_sharpen.isChecked():
-            self._tabs.setCurrentIndex(1)
+    def _schedule_preview_update(self) -> None:
+        """Déclenche la mise à jour du preview avec debounce (200 ms)."""
         self._preview_debounce.stop()
         self._preview_debounce.start(200)
 
-    def _on_tab_changed(self, index: int) -> None:
-        if index == 1:
-            self._update_preview()
+    def _zoom_in(self) -> None:
+        self._viewer.zoom_in()
+        self._preview_viewer.zoom_in()
+
+    def _zoom_out(self) -> None:
+        self._viewer.zoom_out()
+        self._preview_viewer.zoom_out()
+
+    def _zoom_fit(self) -> None:
+        self._viewer.zoom_fit()
+        self._preview_viewer.zoom_fit()
+
+    def _on_options_changed(self) -> None:
+        self._schedule_preview_update()
 
     def _add_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(self, "Ajouter des images", str(self._input_dir), "Images (*.jpg *.jpeg *.png *.tiff *.tif);;Tous (*.*)")
