@@ -40,18 +40,28 @@ if not defined PY (
 
 REM --- Verifier version Python 3.11+ ---
 set "CHECK_VER=%TEMP%\rectify_check_py_ver.py"
-echo import sys > "%CHECK_VER%"
-echo sys.exit(0 if sys.version_info ^>= ^(3,11^) else 1^) >> "%CHECK_VER%"
+set "CHECK_RES=%TEMP%\rectify_check_result.txt"
+echo import sys, os > "%CHECK_VER%"
+echo m,n = sys.version_info[0], sys.version_info[1] >> "%CHECK_VER%"
+echo ok = m ^> 3 or m == 3 and n ^>= 11 >> "%CHECK_VER%"
+echo p = os.path.join^(os.environ.get^("TEMP",""^), "rectify_check_result.txt"^) >> "%CHECK_VER%"
+echo open^(p, "w"^).write^("1" if ok else "0"^) >> "%CHECK_VER%"
 %PY% "%CHECK_VER%"
-if errorlevel 1 (
+if not exist "%CHECK_RES%" (
     del "%CHECK_VER%" 2>nul
-    echo ERREUR: Python 3.11+ requis. Version detectee:
+    echo ERREUR: Python 3.11+ requis.
+    pause
+    exit /b 1
+)
+set /p VER_OK=<"%CHECK_RES%"
+del "%CHECK_VER%" "%CHECK_RES%" 2>nul
+if not "!VER_OK!"=="1" (
+    echo ERREUR: Python 3.11+ requis.
     %PY% --version
     echo.
     pause
     exit /b 1
 )
-del "%CHECK_VER%" 2>nul
 echo Python detecte:
 %PY% --version
 echo.
