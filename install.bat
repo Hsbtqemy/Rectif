@@ -34,14 +34,19 @@ if not defined PY (
 )
 
 REM --- Verifier version Python 3.11+ ---
-%PY% -c "import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)"
+set "CHECK_VER=%TEMP%\rectify_check_py_ver.py"
+echo import sys > "%CHECK_VER%"
+echo sys.exit(0 if sys.version_info ^>= ^(3,11^) else 1^) >> "%CHECK_VER%"
+%PY% "%CHECK_VER%"
 if errorlevel 1 (
+    del "%CHECK_VER%" 2>nul
     echo ERREUR: Python 3.11+ requis. Version detectee:
     %PY% --version
     echo.
     pause
     exit /b 1
 )
+del "%CHECK_VER%" 2>nul
 echo Python detecte:
 %PY% --version
 echo.
