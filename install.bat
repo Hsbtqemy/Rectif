@@ -51,12 +51,34 @@ echo Python detecte:
 %PY% --version
 echo.
 
+REM --- Obtenir le chemin complet de Python (plus fiable que py -3 pour venv) ---
+set "GET_EXE=%TEMP%\rectify_get_py_exe.py"
+echo import sys > "%GET_EXE%"
+echo print^(sys.executable^) >> "%GET_EXE%"
+for /f "delims=" %%i in ('%PY% "%GET_EXE%" 2^>nul') do set "PYEXE=%%i"
+del "%GET_EXE%" 2>nul
+if not defined PYEXE (
+    echo ERREUR: Impossible d'obtenir le chemin de Python.
+    pause
+    exit /b 1
+)
+
 REM --- Creer venv si absent ---
 if not exist ".venv\Scripts\python.exe" (
     echo Creation de l'environnement virtuel (.venv)...
-    %PY% -m venv ".venv"
+    echo Commande: "%PYEXE%" -m venv ".venv"
+    "%PYEXE%" -m venv ".venv"
     if errorlevel 1 (
         echo ERREUR: Impossible de creer le venv.
+        echo - Verifiez les droits d'ecriture dans: %CD%
+        echo - Desactivez temporairement l'antivirus si besoin
+        pause
+        exit /b 1
+    )
+    if not exist ".venv\Scripts\python.exe" (
+        echo ERREUR: Le venv a ete cree mais python.exe est absent.
+        echo Suppression du venv incomplet...
+        rmdir /s /q ".venv" 2>nul
         pause
         exit /b 1
     )
