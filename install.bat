@@ -7,19 +7,24 @@ cd /d "%~dp0"
 REM UTF-8 (si dispo)
 chcp 65001 >nul 2>nul
 
+REM Garder la fenetre ouverte en cas d'erreur (pour debug)
+if "%~1"=="--debug" (
+    title Rectify - Installation (mode debug)
+)
+
 echo === Rectify Perspective - Installation ===
 echo Dossier: %CD%
 echo.
 
-REM --- Trouver Python ---
+REM --- Trouver Python (python prioritaire, py -3 en secours) ---
 set "PY="
-where py >nul 2>nul
+where python >nul 2>nul
 if !errorlevel! == 0 (
-    set "PY=py -3"
+    set "PY=python"
 ) else (
-    where python >nul 2>nul
+    where py >nul 2>nul
     if !errorlevel! == 0 (
-        set "PY=python"
+        set "PY=py -3"
     )
 )
 
@@ -51,23 +56,11 @@ echo Python detecte:
 %PY% --version
 echo.
 
-REM --- Obtenir le chemin complet de Python (plus fiable que py -3 pour venv) ---
-set "GET_EXE=%TEMP%\rectify_get_py_exe.py"
-echo import sys > "%GET_EXE%"
-echo print^(sys.executable^) >> "%GET_EXE%"
-for /f "delims=" %%i in ('%PY% "%GET_EXE%" 2^>nul') do set "PYEXE=%%i"
-del "%GET_EXE%" 2>nul
-if not defined PYEXE (
-    echo ERREUR: Impossible d'obtenir le chemin de Python.
-    pause
-    exit /b 1
-)
-
 REM --- Creer venv si absent ---
 if not exist ".venv\Scripts\python.exe" (
     echo Creation de l'environnement virtuel (.venv)...
-    echo Commande: "%PYEXE%" -m venv ".venv"
-    "%PYEXE%" -m venv ".venv"
+    echo Commande: %PY% -m venv ".venv"
+    %PY% -m venv ".venv"
     if errorlevel 1 (
         echo ERREUR: Impossible de creer le venv.
         echo - Verifiez les droits d'ecriture dans: %CD%
